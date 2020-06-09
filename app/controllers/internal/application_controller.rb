@@ -1,4 +1,5 @@
 class Internal::ApplicationController < ApplicationController
+  before_action :authenticate_user!
   before_action :authorize_admin
   after_action :verify_authorized
 
@@ -39,6 +40,7 @@ class Internal::ApplicationController < ApplicationController
   end
 
   def authorize_admin
+    puts "authorize_admin #{authorization_resource}"
     authorize(authorization_resource, :access?, policy_class: InternalPolicy)
   end
 end

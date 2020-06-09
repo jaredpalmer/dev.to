@@ -1,6 +1,9 @@
 ENV["RAILS_ENV"] = "test"
+require "knapsack_pro"
+KnapsackPro::Adapters::RSpecAdapter.bind
 
 require "spec_helper"
+
 require File.expand_path("../config/environment", __dir__)
 require "rspec/rails"
 abort("The Rails environment is running in production mode!") if Rails.env.production?
@@ -49,6 +52,7 @@ allowed_sites = [
   "https://github.com/mozilla/geckodriver/releases",
   "https://selenium-release.storage.googleapis.com",
   "https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver",
+  "api.knapsackpro.com",
 ]
 WebMock.disable_net_connect!(allow_localhost: true, allow: allowed_sites)
 
@@ -61,6 +65,147 @@ Rack::Attack.enabled = false
 # explicitly configure field tests to exclude bots
 # see https://github.com/fnando/browser/blob/master/CHANGELOG.md#300
 Browser::Bot.matchers.delete(Browser::Bot::EmptyUserAgentMatcher)
+
+module Devise
+  module Test
+    module IntegrationHelpers
+      def sign_in(resource, scope: nil)
+        scope ||= Devise::Mapping.find_scope!(resource)
+        puts("SIGN_IN user SCOPE: #{scope}")
+        login_as(resource, scope: scope)
+      end
+    end
+  end
+end
+
+module Warden
+  module Test
+    module Helpers
+      def login_as(user, opts = {})
+        Warden.on_next_request do |proxy|
+          opts[:event] ||= :authentication
+          puts("USER: #{user} OPTS: #{opts}")
+          proxy.set_user(user, opts)
+        end
+      end
+    end
+  end
+end
+
+module Warden
+  class Proxy
+    def set_user(user, opts = {})
+      scope = (opts[:scope] ||= @config.default_scope)
+
+      # Get the default options from the master configuration for the given scope
+      opts = (@config[:scope_defaults][scope] || {}).merge(opts)
+      opts[:event] ||= :set_user
+      @users[scope] = user
+
+      if opts[:store] != false && opts[:event] != :fetch
+        options = env[ENV_SESSION_OPTIONS]
+        if options
+          if options.frozen?
+            env[ENV_SESSION_OPTIONS] = options.merge(renew: true).freeze
+          else
+            options[:renew] = true
+          end
+        end
+        session_serializer.store(user, scope)
+      end
+
+      run_callbacks = opts.fetch(:run_callbacks, true)
+      manager._run_callbacks(:after_set_user, user, self, opts) if run_callbacks
+
+      r = @users[scope]
+      puts("SET_USER RESULT: #{r}")
+      r
+    end
+  end
+end
+
+# module Warden
+#   module Hooks
+
+#     # Hook to _run_callbacks asserting for conditions.
+#     def _run_callbacks(kind, *args) #:nodoc:
+#       options = args.last # Last callback arg MUST be a Hash
+
+#       send("_#{kind}").each do |callback, conditions|
+#         invalid = conditions.find do |key, value|
+#           value.is_a?(Array) ? !value.include?(options[key]) : (value != options[key])
+#         end
+
+#         callback.call(*args) unless invalid
+#       end
+#     end
+#   end
+# end
+
+# module Pundit
+#   class << self
+#     # Retrieves the policy for the given record, initializing it with the
+#     # record and user and finally throwing an error if the user is not
+#     # authorized to perform the given action.
+#     #
+#     # @param user [Object] the user that initiated the action
+#     # @param record [Object] the object we're checking permissions of
+#     # @param query [Symbol, String] the predicate method to check on the policy (e.g. `:show?`)
+#     # @param policy_class [Class] the policy class we want to force use of
+#     # @raise [NotAuthorizedError] if the given query method returned false
+#     # @return [Object] Always returns the passed object record
+#     def authorize(user, record, query, policy_class: nil)
+#       policy = policy_class ? policy_class.new(user, record) : policy!(user, record)
+
+#       raise NotAuthorizedError, query: query, record: record, policy: policy unless policy.public_send(query)
+
+#       record.is_a?(Array) ? record.last : record
+#     end
+#   end
+
+#   protected
+
+#   # @return [Boolean] whether authorization has been performed, i.e. whether
+#   #                   one {#authorize} or {#skip_authorization} has been called
+#   def pundit_policy_authorized?
+#     !!@_pundit_policy_authorized
+#   end
+
+#   # Raises an error if authorization has not been performed, usually used as an
+#   # `after_action` filter to prevent programmer error in forgetting to call
+#   # {#authorize} or {#skip_authorization}.
+#   #
+#   # @see https://github.com/varvet/pundit#ensuring-policies-and-scopes-are-used
+#   # @raise [AuthorizationNotPerformedError] if authorization has not been performed
+#   # @return [void]
+#   def verify_authorized
+#     raise AuthorizationNotPerformedError, self.class unless pundit_policy_authorized?
+#   end
+
+#   # Retrieves the policy for the given record, initializing it with the record
+#   # and current user and finally throwing an error if the user is not
+#   # authorized to perform the given action.
+#   #
+#   # @param record [Object] the object we're checking permissions of
+#   # @param query [Symbol, String] the predicate method to check on the policy (e.g. `:show?`).
+#   #   If omitted then this defaults to the Rails controller action name.
+#   # @param policy_class [Class] the policy class we want to force use of
+#   # @raise [NotAuthorizedError] if the given query method returned false
+#   # @return [Object] Always returns the passed object record
+#   def authorize(record, query = nil, policy_class: nil)
+#     puts "AUTHORIZE #{record}"
+#     puts "ACTION NAME #{action_name}"
+#     query ||= "#{action_name}?"
+
+#     @_pundit_policy_authorized = true
+
+#     policy = policy_class ? policy_class.new(pundit_user, record) : policy(record)
+
+#     raise NotAuthorizedError, query: query, record: record, policy: policy unless policy.public_send(query)
+
+#     record.is_a?(Array) ? record.last : record
+#   end
+# end
 
 RSpec.configure do |config|
   config.use_transactional_fixtures = true
@@ -158,6 +303,19 @@ RSpec.configure do |config|
     # Prevent Percy.snapshot from trying to hit the agent while not in use
 
     allow(Percy).to receive(:snapshot)
+  end
+
+  config.after do
+    Timecop.return
+  end
+
+  config.after(:suite) do
+    WebMock.disable_net_connect!(
+      allow_localhost: true,
+      allow: [
+        "api.knapsackpro.com",
+      ],
+    )
   end
 
   OmniAuth.config.test_mode = true

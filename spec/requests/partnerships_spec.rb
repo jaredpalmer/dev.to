@@ -66,6 +66,7 @@ RSpec.describe "Partnerships", type: :request do
         before do
           SiteConfig.email_addresses = { business: biz_email }
           create(:organization_membership, user: user, organization: org, type_of_user: "admin")
+          sign_in user
         end
 
         %w[media devrel gold].each do |level|

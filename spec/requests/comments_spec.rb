@@ -327,8 +327,6 @@ RSpec.describe "Comments", type: :request do
   end
 
   describe "DELETE /comments/:comment_id" do
-    # we're using local article and comments, to avoid removing data used by other tests,
-    # which will incur in ordering issues
     let!(:article) { create(:article, user: user) }
     let!(:comment) { create(:comment, commentable: article, user: user) }
 

@@ -22,11 +22,13 @@ RSpec.describe "ProfilePins", type: :request do
 
     it "allows only five pins" do
       articles = [article, article2, article3, article4, article5, article6, article7]
-      articles.each do |a|
+      response_statues = articles.map do |a|
         post "/profile_pins", params: {
           profile_pin: { pinnable_id: a.id }
         }
+        response.status
       end
+      expect(response_statues.all? { |s| s == 302 }).to be(true)
       expect(user.reload.profile_pins.size).to eq(5)
     end
   end

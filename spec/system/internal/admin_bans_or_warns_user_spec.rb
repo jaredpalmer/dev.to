@@ -1,3 +1,4 @@
+
 require "rails_helper"
 
 RSpec.describe "Admin bans user", type: :system do
