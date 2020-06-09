@@ -1,5 +1,4 @@
 class Internal::ApplicationController < ApplicationController
-  before_action :authenticate_user!
   before_action :authorize_admin
   after_action :verify_authorized
 
@@ -40,6 +39,10 @@ class Internal::ApplicationController < ApplicationController
   end
 
   def authorize_admin
+    count = 0
+    max_attempts = 100
+    count += 1 until current_user.present? || count > max_attempts
+
     puts "authorize_admin #{authorization_resource}"
     authorize(authorization_resource, :access?, policy_class: InternalPolicy)
   end
